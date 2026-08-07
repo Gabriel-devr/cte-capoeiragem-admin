@@ -365,7 +365,7 @@ export function Matriculas() {
               <div className="grid grid-cols-2 gap-4">
                 <FormField control={form.control} name="start_date" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Data de início</FormLabel>
+                    <FormLabel>Data de início *</FormLabel>
                     <FormControl>
                       <Input 
                         {...field} 

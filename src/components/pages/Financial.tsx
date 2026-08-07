@@ -204,7 +204,9 @@ export function Financial() {
         <div className="flex flex-col sm:flex-row gap-3 items-end">
           {/* Aluno matriculado */}
           <div className="flex-1">
-            <label className="text-xs text-muted-foreground mb-1.5 block">Aluno Matriculado</label>
+            <label className="text-xs text-muted-foreground mb-1.5 block">
+              Aluno Matriculado <span className="text-destructive">*</span>
+            </label>
             <Select value={selectedStudent} onValueChange={setSelectedStudent}>
               <SelectTrigger className="bg-input-background border-accent/20 focus:border-accent">
                 <SelectValue placeholder="Selecione o aluno" />

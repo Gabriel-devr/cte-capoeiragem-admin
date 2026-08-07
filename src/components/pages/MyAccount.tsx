@@ -6,7 +6,9 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { useAuth } from "../../contexts/AuthContext";
 import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
+import { z } from "zod";
 import { updatePassword } from "@/actions/user_data";
 import {
   Form,
@@ -17,10 +19,19 @@ import {
   FormMessage,
 } from "../ui/form";
 
+const passwordSchema = z.object({
+  newPassword: z.string().min(6, "A senha deve ter pelo menos 6 caracteres"),
+  confirmPassword: z.string().min(6, "A confirmação de senha é obrigatória"),
+}).refine((data) => data.newPassword === data.confirmPassword, {
+  message: "As senhas não coincidem",
+  path: ["confirmPassword"],
+});
+
 export function MyAccount() {
   const { user } = useAuth();
 
   const passwordForm = useForm({
+    resolver: zodResolver(passwordSchema),
     defaultValues: {
       newPassword: "",
       confirmPassword: "",
@@ -28,11 +39,6 @@ export function MyAccount() {
   });
 
   const onPasswordSubmit = async (data: any) => {
-    if (data.newPassword !== data.confirmPassword) {
-      toast.error("As senhas não coincidem");
-      return;
-    }
-
     const res = await updatePassword(data.newPassword);
     if (res.result === "sucesso") {
       toast.success("Senha alterada com sucesso!");
@@ -78,14 +84,14 @@ export function MyAccount() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <FormField control={passwordForm.control} name="newPassword" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Nova senha</FormLabel>
+                  <FormLabel>Nova senha *</FormLabel>
                   <FormControl><Input {...field} type="password" placeholder="••••••••" className="bg-input-background" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
               <FormField control={passwordForm.control} name="confirmPassword" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Confirmar nova senha</FormLabel>
+                  <FormLabel>Confirmar nova senha *</FormLabel>
                   <FormControl><Input {...field} type="password" placeholder="••••••••" className="bg-input-background" /></FormControl>
                   <FormMessage />
                 </FormItem>

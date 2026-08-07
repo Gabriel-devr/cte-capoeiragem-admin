@@ -379,12 +379,12 @@ export function Students() {
                   )} />
                   <FormField control={form.control} name="telephone" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Telefone</FormLabel>
+                      <FormLabel>Telefone *</FormLabel>
                       <FormControl>
                         <Input 
                           {...field} 
                           value={field.value || ""} 
-                          placeholder="(00) 00000-0000"
+                          placeholder="(00) 0 0000-0000"
                           className="bg-input-background" 
                           onChange={handleFormattedChange("telephone", formatPhone)}
                         />
@@ -637,7 +637,7 @@ export function Students() {
                             <Input
                               {...field}
                               value={field.value || ""}
-                              placeholder="(00) 00000-0000"
+                              placeholder="(00) 0 0000-0000"
                               className="bg-input-background"
                               onChange={handleFormattedNestedChange(index, "phone", formatPhone)}
                             />
