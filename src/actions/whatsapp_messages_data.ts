@@ -16,9 +16,11 @@ export interface ConversationListItem {
   display_name: string | null;
   last_message_at: string | null;
   last_customer_message_at: string | null;
+  last_read_at: string | null;
   created_at: string;
   student_name: string | null;
   window_open: boolean;
+  unread: boolean;
 }
 
 export interface MessageItem {
@@ -87,7 +89,7 @@ export async function listConversations() {
 
     const { data: conversations, error } = await supabase
       .from("whatsapp_conversations")
-      .select("id, student_id, wa_id, display_name, last_message_at, last_customer_message_at, created_at")
+      .select("id, student_id, wa_id, display_name, last_message_at, last_customer_message_at, last_read_at, created_at")
       .order("last_message_at", { ascending: false, nullsFirst: false });
 
     if (error) throw error;
@@ -118,10 +120,38 @@ export async function listConversations() {
         ...c,
         student_name: student ? student.nickname || student.full_name : null,
         window_open: !!c.last_customer_message_at && now - new Date(c.last_customer_message_at).getTime() < JANELA_24H_MS,
+        // Não lida = o cliente mandou mensagem depois da última vez que o
+        // admin abriu essa conversa (last_read_at null = nunca abriu).
+        unread:
+          !!c.last_customer_message_at &&
+          (!c.last_read_at || new Date(c.last_customer_message_at).getTime() > new Date(c.last_read_at).getTime()),
       };
     });
 
     return { result: "sucesso", conversations: result };
+  } catch (err: any) {
+    return { result: "erro", details: err.message };
+  }
+}
+
+// Marca a conversa como lida até agora - chamada quando o admin abre a
+// conversa e de novo a cada mensagem nova recebida enquanto ela está aberta,
+// pra ela nunca aparecer como não lida enquanto está sendo vista. Usa
+// supabaseAdm (Service Role) pelo mesmo motivo do resto do arquivo: a RLS de
+// whatsapp_conversations só libera escrita pro Service Role.
+export async function markConversationRead(conversation_id: string) {
+  try {
+    const supabase = await createClientServer();
+    const guard = await assertAdmin(supabase);
+    if (!guard.ok) return { result: "erro", details: guard.details };
+
+    const { error } = await supabaseAdm
+      .from("whatsapp_conversations")
+      .update({ last_read_at: new Date().toISOString() })
+      .eq("id", conversation_id);
+
+    if (error) throw error;
+    return { result: "sucesso" };
   } catch (err: any) {
     return { result: "erro", details: err.message };
   }

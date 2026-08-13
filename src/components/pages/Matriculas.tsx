@@ -22,6 +22,7 @@ import { createMatricula, listMatriculas, updateMatricula, cancelarMatricula } f
 import { listStudent } from "@/actions/student_data";
 import { listPlanos } from "@/actions/plano_data";
 import { formatDateInput, toBRDate, toISODate } from "@/utils/formatters";
+import { TAXA_MATRICULA } from "@/utils/whatsappTemplates";
 
 interface Matricula {
   id: string;
@@ -357,7 +358,7 @@ export function Matriculas() {
                       </FormControl>
                       <FormLabel className="font-medium text-foreground !mt-0">Cobrar taxa única de matrícula</FormLabel>
                     </div>
-                    <span className="font-semibold text-accent">R$ 45,00</span>
+                    <span className="font-semibold text-accent">R$ {TAXA_MATRICULA.toFixed(2).replace(".", ",")}</span>
                   </FormItem>
                 )}
               />

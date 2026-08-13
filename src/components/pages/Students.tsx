@@ -494,6 +494,7 @@ export function Students() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
+                          <SelectItem value="Nenhum">Nenhum</SelectItem>
                           <SelectItem value="2 anos">2 anos</SelectItem>
                           <SelectItem value="4 anos">4 anos</SelectItem>
                           <SelectItem value="6 anos">6 anos</SelectItem>
@@ -520,6 +521,7 @@ export function Students() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
+                          <SelectItem value="Nenhum">Nenhum</SelectItem>
                           <SelectItem value="2 anos">2 anos</SelectItem>
                           <SelectItem value="4 anos">4 anos</SelectItem>
                           <SelectItem value="6 anos">6 anos</SelectItem>
@@ -547,6 +549,7 @@ export function Students() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
+                          <SelectItem value="Nenhum">Nenhum</SelectItem>
                           <SelectItem value="P adulto">P adulto</SelectItem>
                           <SelectItem value="M adulto">M adulto</SelectItem>
                           <SelectItem value="G adulto">G adulto</SelectItem>
