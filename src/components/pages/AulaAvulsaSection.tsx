@@ -255,7 +255,7 @@ export function AulaAvulsaSection({
                       <Input
                         {...field}
                         value={field.value || ""}
-                        placeholder="(00) 00000-0000"
+                        placeholder="(00) 0 0000-0000"
                         className="bg-input-background border-accent/20 focus:border-accent"
                         onChange={handleFormattedChange("telefone", formatPhone)}
                       />

@@ -5,7 +5,7 @@ import { createClientServer, supabaseAdm } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { assertAdmin } from "@/lib/authGuard";
 import { logOutboundCobranca } from "./whatsapp_messages_data";
-import { renderTemplateCobranca } from "@/utils/whatsappTemplates";
+import { renderTemplateCobranca, isCobrancaTemplateId, type CobrancaTemplateId } from "@/utils/whatsappTemplates";
 import { buildWaId } from "@/utils/formatters";
 import { sendTemplateMessage } from "@/lib/whatsapp/client";
 
@@ -13,6 +13,7 @@ type SupabaseServerClient = Awaited<ReturnType<typeof createClientServer>>;
 
 interface AgendamentoParaEnvio {
   id: string;
+  student_id: string;
   telephone: string | null;
   full_name: string;
   valor: number;
@@ -26,7 +27,12 @@ interface AgendamentoParaEnvio {
 // em poucos segundos, bem longe de qualquer rate limit real da Graph API.
 const WHATSAPP_SEND_CONCURRENCY = Number(process.env.WHATSAPP_SEND_CONCURRENCY) || 10;
 
-async function processarEnvioCobranca(row: AgendamentoParaEnvio, supabase: SupabaseServerClient) {
+async function processarEnvioCobranca(
+  row: AgendamentoParaEnvio,
+  supabase: SupabaseServerClient,
+  templateId: CobrancaTemplateId,
+  taxaMatriculaPendenteSet: Set<string>
+) {
   try {
     const to = buildWaId(row.telephone);
     const primeiroNome = row.full_name.split(" ")[0];
@@ -34,7 +40,7 @@ async function processarEnvioCobranca(row: AgendamentoParaEnvio, supabase: Supab
     const sendResult = to
       ? await sendTemplateMessage({
           to,
-          templateName: "cobranca_mensalidade_aluno",
+          templateName: templateId,
           languageCode: "pt_BR",
           bodyParams: [primeiroNome, Number(row.valor).toFixed(2)],
         })
@@ -51,6 +57,20 @@ async function processarEnvioCobranca(row: AgendamentoParaEnvio, supabase: Supab
         ...(sendResult.ok ? { whatsapp_message_id: sendResult.whatsappMessageId } : {}),
       })
       .eq("id", row.id);
+
+    // A taxa de matrícula só é cobrada uma vez: se esse aluno estava com ela
+    // pendente e a mensagem realmente saiu (status "sent"), desmarca
+    // enrollments.taxa_matricula pra ela não entrar de novo na próxima
+    // cobrança. Em falha de envio o campo continua marcado de propósito -
+    // a mensagem com o valor da taxa nunca chegou no cliente, então ela
+    // precisa ser reoferecida no reenvio.
+    if (sendResult.ok && taxaMatriculaPendenteSet.has(row.student_id)) {
+      await supabase
+        .from("enrollments")
+        .update({ taxa_matricula: false })
+        .eq("student_id", row.student_id)
+        .eq("status", "active");
+    }
 
     // Reflete o mesmo resultado na linha espelho de whatsapp_messages (tela
     // Mensagens), senão ela fica presa em "pending" pra sempre mesmo com a
@@ -80,6 +100,39 @@ async function processarEnvioCobranca(row: AgendamentoParaEnvio, supabase: Supab
   }
 }
 
+// Entre os student_ids informados, quais têm a taxa única de matrícula
+// pendente (matrícula ativa cadastrada com taxa_matricula=true e ainda sem
+// nenhuma cobrança "sent") - mesmo critério usado em listCobrancas pra somar
+// a taxa no valor, reaproveitado aqui só pra saber quem deve ter o campo
+// desmarcado depois do envio (ver processarEnvioCobranca).
+async function getTaxaMatriculaPendenteSet(
+  supabase: SupabaseServerClient,
+  studentIds: string[]
+): Promise<Set<string>> {
+  if (studentIds.length === 0) return new Set();
+
+  const { data: comTaxa, error: taxaError } = await supabase
+    .from("enrollments")
+    .select("student_id")
+    .eq("status", "active")
+    .eq("taxa_matricula", true)
+    .in("student_id", studentIds);
+  if (taxaError) throw taxaError;
+
+  const comTaxaIds = (comTaxa || []).map((r: any) => r.student_id);
+  if (comTaxaIds.length === 0) return new Set();
+
+  const { data: jaCobrados, error: cobradosError } = await supabase
+    .from("whatsapp_cobrancas_agendadas")
+    .select("student_id")
+    .eq("status", "sent")
+    .in("student_id", comTaxaIds);
+  if (cobradosError) throw cobradosError;
+
+  const jaCobradosSet = new Set((jaCobrados || []).map((r: any) => r.student_id));
+  return new Set(comTaxaIds.filter((id: string) => !jaCobradosSet.has(id)));
+}
+
 export interface CobrancaItem {
   student_id: string;
   full_name: string;
@@ -89,6 +142,12 @@ export interface CobrancaItem {
   valor_original: number;
   valor_desconto: number | null;
   valor_familia: number | null;
+  bolsa_integral: boolean;
+  bolsa_parcial: boolean;
+  // Verdadeiro só quando a matrícula foi cadastrada com a taxa única (ver
+  // taxa_matricula em enrollments) E ela ainda não foi comunicada em nenhuma
+  // cobrança já enviada - ou seja, é a cobrança que deve somar a taxa.
+  taxa_matricula_pendente: boolean;
 }
 
 export interface HistoricoMensagem {
@@ -110,15 +169,33 @@ export async function listCobrancas() {
       .from("enrollments")
       .select(`
         student_id,
+        taxa_matricula,
         student (student_id, full_name, nickname, telephone),
-        plano (nome_plano, preco_original, preco_desconto, preco_familia)
+        plano (nome_plano, preco_original, preco_desconto, preco_familia, gratuidade, bolsa_parcial)
       `)
       .eq("status", "active");
 
     if (error) throw error;
 
-    const cobrancas: CobrancaItem[] = (data || [])
-      .filter((row: any) => row.student && row.plano)
+    const linhas = (data || []).filter((row: any) => row.student && row.plano);
+
+    // A taxa de matrícula só entra na primeira cobrança que o aluno recebe
+    // por aqui - depois disso já foi comunicada e cobrada. "Já cobrada" =
+    // existe alguma cobrança com status "sent" pra esse aluno (falha/cancelada
+    // não conta, porque nesse caso a mensagem com a taxa nunca chegou de
+    // verdade no cliente, então ela continua pendente pro próximo envio).
+    const studentIds = linhas.map((row: any) => row.student.student_id);
+    const { data: jaCobrados, error: cobradosError } = studentIds.length
+      ? await supabase
+          .from("whatsapp_cobrancas_agendadas")
+          .select("student_id")
+          .eq("status", "sent")
+          .in("student_id", studentIds)
+      : { data: [] as { student_id: string }[], error: null };
+    if (cobradosError) throw cobradosError;
+    const jaCobradosSet = new Set((jaCobrados || []).map((r: any) => r.student_id));
+
+    const cobrancas: CobrancaItem[] = linhas
       .map((row: any) => ({
         student_id: row.student.student_id,
         full_name: row.student.full_name,
@@ -128,6 +205,12 @@ export async function listCobrancas() {
         valor_original: Number(row.plano.preco_original),
         valor_desconto: row.plano.preco_desconto != null ? Number(row.plano.preco_desconto) : null,
         valor_familia: row.plano.preco_familia != null ? Number(row.plano.preco_familia) : null,
+        // Bolsa integral (gratuidade) nunca deve ser cobrada; bolsa parcial só
+        // tem "valor original" cadastrado (já reduzido pela bolsa) - ambas
+        // precisam ser sinalizadas pra tela separar em modos próprios.
+        bolsa_integral: !!row.plano.gratuidade,
+        bolsa_parcial: !!row.plano.bolsa_parcial,
+        taxa_matricula_pendente: !!row.taxa_matricula && !jaCobradosSet.has(row.student.student_id),
       }))
       .sort((a: CobrancaItem, b: CobrancaItem) => a.full_name.localeCompare(b.full_name));
 
@@ -144,7 +227,8 @@ export async function listCobrancas() {
 // existindo só como identificador do disparo (útil pra rastrear/depurar), não é
 // mais usado por nenhum processo externo pra buscar linhas pendentes.
 export async function enviarCobrancas(
-  items: { student_id: string; full_name: string; telephone: string; valor: number }[]
+  items: { student_id: string; full_name: string; telephone: string; valor: number }[],
+  templateId: string
 ) {
   try {
     const supabase = await createClientServer();
@@ -152,6 +236,9 @@ export async function enviarCobrancas(
     if (!guard.ok) return { result: "erro", details: guard.details };
 
     if (items.length === 0) return { result: "erro", details: "Nenhum aluno selecionado." };
+    if (!isCobrancaTemplateId(templateId)) {
+      return { result: "erro", details: "Template de mensagem inválido." };
+    }
 
     const hoje = new Date().toISOString().split("T")[0];
 
@@ -175,15 +262,14 @@ export async function enviarCobrancas(
 
     const loteId = randomUUID();
 
-    // Mensagem renderizada a partir do template aprovado na Meta (único
-    // texto que reflete o que o cliente de fato recebe hoje - não existe
-    // mais template livre editável pelo admin). Calculada uma vez por item e
-    // reaproveitada tanto no histórico de cobranças quanto no espelho
-    // unificado da tela Mensagens, pra não correr risco dos dois textos
-    // divergirem.
+    // Mensagem renderizada a partir do template escolhido pelo admin (um dos
+    // templates aprovados na Meta - não existe mais texto livre editável).
+    // Calculada uma vez por item e reaproveitada tanto no histórico de
+    // cobranças quanto no espelho unificado da tela Mensagens, pra não
+    // correr risco dos dois textos divergirem.
     const itemsComMensagem = itemsParaEnviar.map((item) => ({
       ...item,
-      mensagem: renderTemplateCobranca(item.full_name.split(" ")[0], item.valor),
+      mensagem: renderTemplateCobranca(templateId, item.full_name.split(" ")[0], item.valor),
     }));
 
     // Cria a linha espelho em whatsapp_messages ANTES do insert em
@@ -217,11 +303,23 @@ export async function enviarCobrancas(
           mirror_message_id: item.mirror_message_id,
         }))
       )
-      .select("id, telephone, full_name, valor, mirror_message_id");
+      .select("id, student_id, telephone, full_name, valor, mirror_message_id");
 
     if (error) throw error;
     revalidatePath("/dashboard/account");
     revalidatePath("/dashboard/mensagens");
+    // O envio pode desmarcar enrollments.taxa_matricula (ver
+    // processarEnvioCobranca) - revalida a tela de Matrículas pra não mostrar
+    // o checkbox "desatualizado" se o admin abrir editar logo em seguida.
+    revalidatePath("/dashboard/matriculas");
+
+    // Quem nesse lote está com a taxa de matrícula pendente - usado por
+    // processarEnvioCobranca pra desmarcar enrollments.taxa_matricula assim
+    // que a cobrança correspondente for enviada com sucesso.
+    const taxaMatriculaPendenteSet = await getTaxaMatriculaPendenteSet(
+      supabase,
+      itemsParaEnviar.map((item) => item.student_id)
+    );
 
     // Envia de verdade via Graph API, em lotes concorrentes (ver
     // processarEnvioCobranca/WHATSAPP_SEND_CONCURRENCY acima). Cada lote espera
@@ -229,7 +327,7 @@ export async function enviarCobrancas(
     const fila = (agendamentos ?? []) as AgendamentoParaEnvio[];
     for (let i = 0; i < fila.length; i += WHATSAPP_SEND_CONCURRENCY) {
       const lote = fila.slice(i, i + WHATSAPP_SEND_CONCURRENCY);
-      await Promise.all(lote.map((row) => processarEnvioCobranca(row, supabase)));
+      await Promise.all(lote.map((row) => processarEnvioCobranca(row, supabase, templateId, taxaMatriculaPendenteSet)));
     }
 
     const ignorados = items.length - itemsParaEnviar.length;

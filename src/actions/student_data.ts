@@ -198,7 +198,19 @@ export async function deleteStudent(id: string) {
         const guard = await assertAdmin(supabase);
         if (!guard.ok) return { result: "erro", details: guard.details };
         const { error } = await supabase.from('student').delete().eq('student_id', id);
-        if (error) throw error;
+        if (error) {
+            // 23503 = foreign_key_violation. Deixado de propósito: matrícula,
+            // transações financeiras e cobranças não têm ON DELETE
+            // CASCADE/SET NULL, então a exclusão é bloqueada enquanto esse
+            // histórico existir, em vez de apagá-lo junto com o aluno.
+            if (error.code === '23503') {
+                return {
+                    result: "erro",
+                    details: "Este aluno possui matrícula, cobrança e/ou histórico financeiro vinculado e não pode ser excluído. Cancele a matrícula em vez de excluir o cadastro.",
+                };
+            }
+            throw error;
+        }
         revalidatePath('/dashboard/alunos');
         return { result: "sucesso" };
     } catch (err: any) {

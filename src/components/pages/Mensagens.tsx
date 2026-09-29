@@ -8,10 +8,12 @@ import { Avatar, AvatarFallback } from "../ui/avatar";
 import { ScrollArea } from "../ui/scroll-area";
 import { Textarea } from "../ui/textarea";
 import { Button } from "../ui/button";
+import { Dialog, DialogContent, DialogTitle } from "../ui/dialog";
 
 import {
   listConversations,
   listMessages,
+  markConversationRead,
   resolveMediaUrl,
   sendReply,
   type ConversationListItem,
@@ -73,11 +75,18 @@ function rotuloData(iso: string) {
 // bucket privado whatsapp-media, já resolvidos como Signed URL (media_url)
 // pelo listMessages(). Sem media_url (signed url falhou ou ainda não
 // disponível) cai no fallback de texto pra não deixar a bolha vazia.
-function MessageBody({ m }: { m: MessageItem }) {
+function MessageBody({ m, onImageClick }: { m: MessageItem; onImageClick: (url: string) => void }) {
   if (m.message_type === "image" && m.media_url) {
     return (
       <div className="space-y-1">
-        <img src={m.media_url} alt="Imagem enviada" className="max-w-full max-h-64 rounded-md object-contain" />
+        <button
+          type="button"
+          onClick={() => onImageClick(m.media_url as string)}
+          className="block cursor-pointer"
+          title="Clique para ampliar"
+        >
+          <img src={m.media_url} alt="Imagem enviada" className="max-w-full max-h-64 rounded-md object-contain" />
+        </button>
         {m.content && <p className="whitespace-pre-wrap break-words">{m.content}</p>}
       </div>
     );
@@ -124,6 +133,8 @@ export function Mensagens() {
 
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
+
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -173,6 +184,15 @@ export function Mensagens() {
     if (selectedId) fetchMessages(selectedId);
   }, [selectedId]);
 
+  // Marca como lida assim que o admin abre a conversa - atualiza local
+  // (badge some na hora) e grava no servidor. Sem isso a conversa fica
+  // marcada como não lida na sidebar mesmo depois de aberta.
+  useEffect(() => {
+    if (!selectedId) return;
+    setConversations((prev) => prev.map((c) => (c.id === selectedId ? { ...c, unread: false } : c)));
+    markConversationRead(selectedId);
+  }, [selectedId]);
+
   // Realtime da conversa aberta: filtra no servidor por conversation_id, por
   // isso reassina toda vez que a seleção muda.
   useEffect(() => {
@@ -185,6 +205,11 @@ export function Mensagens() {
         { event: "INSERT", schema: "public", table: "whatsapp_messages", filter: `conversation_id=eq.${selectedId}` },
         async (payload) => {
           const nova = payload.new as MessageItem;
+
+          // Mensagem nova do cliente chegando na conversa que já está aberta -
+          // mantém marcada como lida (senão o badge de não lida acende na
+          // sidebar mesmo com o admin olhando pra conversa naquele momento).
+          if (nova.direction === "in") markConversationRead(selectedId);
 
           // Mensagem de mídia: o payload cru do Realtime não tem media_url (essa
           // Signed URL só é calculada no servidor, por listMessages/comMediaUrl) -
@@ -288,16 +313,28 @@ export function Mensagens() {
                         ativa ? "bg-accent/10" : "hover:bg-muted"
                       }`}
                     >
-                      <Avatar>
-                        <AvatarFallback className="bg-accent/20 text-accent font-semibold">
-                          {iniciais(nome)}
-                        </AvatarFallback>
-                      </Avatar>
+                      <div className="relative shrink-0">
+                        <Avatar>
+                          <AvatarFallback className="bg-accent/20 text-accent font-semibold">
+                            {iniciais(nome)}
+                          </AvatarFallback>
+                        </Avatar>
+                        {c.unread && (
+                          <span
+                            className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-accent border-2 border-card"
+                            title="Mensagem não lida"
+                          />
+                        )}
+                      </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="font-medium text-foreground truncate">{nome}</span>
+                          <span className={`truncate ${c.unread ? "font-bold text-foreground" : "font-medium text-foreground"}`}>
+                            {nome}
+                          </span>
                           {c.last_message_at && (
-                            <span className="text-xs text-muted-foreground shrink-0">{dataOuHora(c.last_message_at)}</span>
+                            <span className={`text-xs shrink-0 ${c.unread ? "text-accent font-semibold" : "text-muted-foreground"}`}>
+                              {dataOuHora(c.last_message_at)}
+                            </span>
                           )}
                         </div>
                         <div className="flex items-center justify-between gap-2">
@@ -368,7 +405,7 @@ export function Mensagens() {
                               m.direction === "out" ? "bg-accent text-white" : "bg-muted text-foreground"
                             }`}
                           >
-                            <MessageBody m={m} />
+                            <MessageBody m={m} onImageClick={setLightboxUrl} />
                             <div
                               className={`flex items-center gap-1 mt-1 text-[10px] ${
                                 m.direction === "out" ? "text-white/80 justify-end" : "text-muted-foreground"
@@ -421,6 +458,16 @@ export function Mensagens() {
           </>
         )}
       </div>
+
+      {/* Lightbox: amplia a imagem clicada sem sair da página */}
+      <Dialog open={!!lightboxUrl} onOpenChange={(open) => !open && setLightboxUrl(null)}>
+        <DialogContent className="max-w-3xl p-2 bg-transparent border-none shadow-none">
+          <DialogTitle className="sr-only">Imagem ampliada</DialogTitle>
+          {lightboxUrl && (
+            <img src={lightboxUrl} alt="Imagem ampliada" className="w-full max-h-[85vh] object-contain rounded-md" />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -379,12 +379,12 @@ export function Students() {
                   )} />
                   <FormField control={form.control} name="telephone" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Telefone</FormLabel>
+                      <FormLabel>Telefone *</FormLabel>
                       <FormControl>
                         <Input 
                           {...field} 
                           value={field.value || ""} 
-                          placeholder="(00) 00000-0000"
+                          placeholder="(00) 0 0000-0000"
                           className="bg-input-background" 
                           onChange={handleFormattedChange("telephone", formatPhone)}
                         />
@@ -494,6 +494,7 @@ export function Students() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
+                          <SelectItem value="Nenhum">Nenhum</SelectItem>
                           <SelectItem value="2 anos">2 anos</SelectItem>
                           <SelectItem value="4 anos">4 anos</SelectItem>
                           <SelectItem value="6 anos">6 anos</SelectItem>
@@ -520,6 +521,7 @@ export function Students() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
+                          <SelectItem value="Nenhum">Nenhum</SelectItem>
                           <SelectItem value="2 anos">2 anos</SelectItem>
                           <SelectItem value="4 anos">4 anos</SelectItem>
                           <SelectItem value="6 anos">6 anos</SelectItem>
@@ -547,6 +549,7 @@ export function Students() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
+                          <SelectItem value="Nenhum">Nenhum</SelectItem>
                           <SelectItem value="P adulto">P adulto</SelectItem>
                           <SelectItem value="M adulto">M adulto</SelectItem>
                           <SelectItem value="G adulto">G adulto</SelectItem>
@@ -637,7 +640,7 @@ export function Students() {
                             <Input
                               {...field}
                               value={field.value || ""}
-                              placeholder="(00) 00000-0000"
+                              placeholder="(00) 0 0000-0000"
                               className="bg-input-background"
                               onChange={handleFormattedNestedChange(index, "phone", formatPhone)}
                             />

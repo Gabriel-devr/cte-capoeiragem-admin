@@ -1,13 +1,27 @@
 /**
- * Formata um número de telefone no padrão (XX) XXXXX-XXXX ou (XX) XXXX-XXXX
+ * Formata um número de telefone no padrão (00) 0000-0000 (fixo/celular
+ * antigo, 10 dígitos) ou (00) 0 0000-0000 (celular com o 9º dígito, 11
+ * dígitos). O 9º dígito fica isolado entre parênteses e o resto do número
+ * — essa é a máscara usada em todo o app por causa do envio de cobranças
+ * via WhatsApp (ver buildWaId, que depende da contagem exata de dígitos).
  */
 export const formatPhone = (value: string) => {
   if (!value) return "";
-  const numbers = value.replace(/\D/g, "");
+  const numbers = value.replace(/\D/g, "").slice(0, 11);
   if (numbers.length <= 10) {
     return numbers.replace(/(\d{2})(\d{4})(\d{4})/, "($1) $2-$3");
   }
-  return numbers.replace(/(\d{2})(\d{5})(\d{4})/, "($1) $2-$3");
+  return numbers.replace(/(\d{2})(\d{1})(\d{4})(\d{4})/, "($1) $2 $3-$4");
+};
+
+/**
+ * Valida se um telefone (formatado ou não) tem exatamente 10 dígitos
+ * — (00) 0000-0000 — ou 11 dígitos — (00) 0 0000-0000. Qualquer outra
+ * contagem é rejeitada, pois quebraria o envio de cobranças via WhatsApp.
+ */
+export const isValidPhone = (value: string): boolean => {
+  const numbers = value.replace(/\D/g, "");
+  return numbers.length === 10 || numbers.length === 11;
 };
 
 /**
